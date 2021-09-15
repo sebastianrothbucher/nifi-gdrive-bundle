@@ -1,0 +1,6 @@
+target/**
+nifi-gdrive-nar/target/**
+nifi-gdrive-processors/target/**
+nifi-gdrive-bundle.iml
+nifi-gdrive-nar/nifi-gdrive-nar.iml
+nifi-gdrive-processors/nifi-gdrive-processors.iml
