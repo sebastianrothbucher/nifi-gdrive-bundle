@@ -1,10 +1,22 @@
 package org.apache.nifi.processors.gdrive;
 
+import org.apache.nifi.components.PropertyDescriptor;
+import org.apache.nifi.expression.ExpressionLanguageScope;
 import org.apache.nifi.processor.AbstractProcessor;
-import org.apache.nifi.processor.ProcessContext;
-import org.apache.nifi.processor.ProcessSession;
-import org.apache.nifi.processor.exception.ProcessException;
+import org.apache.nifi.processor.Relationship;
+import org.apache.nifi.processor.util.StandardValidators;
 
 public abstract class AbstractGdriveProcessor extends AbstractProcessor {
 
+    public static final Relationship REL_SUCCESS = new Relationship.Builder().name("success")
+            .description("FlowFiles are routed to success relationship").build();
+    public static final Relationship REL_FAILURE = new Relationship.Builder().name("failure")
+            .description("FlowFiles are routed to failure relationship").build();
+
+    public static final PropertyDescriptor FOLDER = new PropertyDescriptor.Builder()
+            .name("Folder")
+            .expressionLanguageSupported(ExpressionLanguageScope.FLOWFILE_ATTRIBUTES)
+            .required(true)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .build();
 }
