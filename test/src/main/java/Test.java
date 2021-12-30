@@ -25,8 +25,8 @@ public class Test {
                 .build();
         FileList result = service.files().list()
                 .setQ("'1lUN7HEFiDVNjPwYWT136XChDh5JDLoz_' in parents") // also coming from NiFi
-                .setPageSize(10)
-                .setFields("nextPageToken, files(id, name)")
+                .setPageSize(100)
+                .setFields("nextPageToken, files(id, name, mimeType, modifiedTime)")
                 .execute();
         List<File> files = result.getFiles();
         if (files == null || files.isEmpty()) {
@@ -34,7 +34,7 @@ public class Test {
         } else {
             System.out.println("Files:");
             for (File file : files) {
-                System.out.printf("%s (%s)\n", file.getName(), file.getId());
+                System.out.printf("%s (%s, %s, %s, %s)\n", file.getName(), file.getMimeType(), file.getId(), file.getModifiedTime(), result.getNextPageToken());
             }
         }
     }

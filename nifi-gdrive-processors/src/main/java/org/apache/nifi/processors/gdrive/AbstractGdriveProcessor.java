@@ -19,4 +19,13 @@ public abstract class AbstractGdriveProcessor extends AbstractProcessor {
             .required(true)
             .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
             .build();
+
+    public static final PropertyDescriptor IAM_USER_JSON = new PropertyDescriptor.Builder()
+            .name("IAM JSON")
+            .displayName("IAM user JSON")
+            .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
+            .required(true)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .sensitive(true)
+            .build();
 }
