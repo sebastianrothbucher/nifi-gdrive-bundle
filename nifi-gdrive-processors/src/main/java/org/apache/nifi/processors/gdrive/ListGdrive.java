@@ -123,7 +123,7 @@ public class ListGdrive extends AbstractGdriveProcessor {
         final boolean fromBeginning = context.getProperty(FROM_BEGINNING).asBoolean();
         long timestampPrevRun = this.currentTimestamp; // (from last run - or zero)
         boolean first = true;
-        Object nextToken = null;
+        String nextToken = null;
         try {
             final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
             final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
@@ -139,11 +139,13 @@ public class ListGdrive extends AbstractGdriveProcessor {
                 FileList result = service.files().list()
                         .setQ("'" + context.getProperty(FOLDER).getValue() + "' in parents") // also coming from NiFi
                         .setPageSize(context.getProperty(BATCH_SIZE).asInteger())
+                        .setPageToken(nextToken)
                         .setFields("nextPageToken, files(id, name, mimeType, createdTime, modifiedTime)")
                         .execute();
                 List<File> files = result.getFiles();
                 if (null == files || files.isEmpty()) {
                     getLogger().trace("No more file infos");
+                    break;
                 }
                 getLogger().trace("Pulled {} file infos", new Object[] {files.size()});
                 nextToken = result.getNextPageToken();
