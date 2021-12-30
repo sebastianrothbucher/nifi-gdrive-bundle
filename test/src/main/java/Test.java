@@ -1,4 +1,5 @@
 import java.io.FileInputStream;
+import java.io.InputStreamReader;
 import java.util.Arrays;
 import java.util.List;
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
@@ -9,6 +10,7 @@ import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.FileList;
+import org.apache.commons.io.IOUtils;
 
 
 public class Test {
@@ -37,5 +39,12 @@ public class Test {
                 System.out.printf("%s (%s, %s, %s, %s)\n", file.getName(), file.getMimeType(), file.getId(), file.getModifiedTime(), result.getNextPageToken());
             }
         }
+        final Drive.Files.Get get = service.files()
+            .get("1Kv2RXrcQtwAmo9f66UbEJpEWvZAPGiWx")
+            .setFields("id, name, mimeType, createdTime, modifiedTime");
+        File fileMeta = get.execute();
+        System.out.printf("%s (%s, %s, %s)\n", fileMeta.getName(), fileMeta.getMimeType(), fileMeta.getId(), fileMeta.getModifiedTime());
+        String content = IOUtils.toString(new InputStreamReader(get.executeMediaAsInputStream(), "utf-8"));
+        System.out.println(content);
     }
 }

@@ -24,7 +24,6 @@ import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.util.StandardValidators;
 
 import java.io.ByteArrayInputStream;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -33,7 +32,7 @@ import java.util.*;
 @TriggerSerially
 @TriggerWhenEmpty
 @InputRequirement(InputRequirement.Requirement.INPUT_FORBIDDEN)
-@Tags({"Google", "GDrive", "list"})
+@Tags({"Google", "GDrive", "List"})
 @CapabilityDescription("Retrieves a listing of objects from a folder in GDrive. For each object that is listed, creates a FlowFile that represents "
         + "the object so that it can be fetched in conjunction with FetchGDrive. This Processor is designed to run on Primary Node only "
         + "in a cluster. If the primary node changes, the new Primary Node will pick up where the previous node left off without duplicating "
@@ -43,10 +42,26 @@ import java.util.*;
         + "this date the next time that the Processor is run. State is stored across the cluster so that this Processor can be run on Primary Node only and if a new Primary "
         + "Node is selected, the new node can pick up where the previous node left off, without duplicating the data.")
 @WritesAttributes({
-        @WritesAttribute(attribute = "filename", description = "The name of the file")})
+        @WritesAttribute(attribute = "filename", description = "The name of the file"),
+        @WritesAttribute(attribute = "fileid", description = "The id of the file"),
+        @WritesAttribute(attribute = "created", description = "The created date of the file"),
+        @WritesAttribute(attribute = "modified", description = "The modified date of the file"),
+        @WritesAttribute(attribute = "mime.type", description = "The mime type of the file"),
+        @WritesAttribute(attribute = "is.folder", description = "True if this file is a folder"),
+        @WritesAttribute(attribute = "parent.folder", description = "The parent folder = the folder to be listed")
+})
 public class ListGdrive extends AbstractGdriveProcessor {
 
-    static final String FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+    public static final String FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
+
+    public static final PropertyDescriptor FOLDER = new PropertyDescriptor.Builder()
+            .name("Folder")
+            .displayName("Folder")
+            .description("ID of the folder in GDrive")
+            .expressionLanguageSupported(ExpressionLanguageScope.VARIABLE_REGISTRY)
+            .required(true)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .build();
 
     static final PropertyDescriptor BATCH_SIZE = new PropertyDescriptor.Builder()
             .name("Listing Batch Size")
@@ -128,21 +143,21 @@ public class ListGdrive extends AbstractGdriveProcessor {
             final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
             final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
             // get IAM file and provide it as stream (like we'll store it as secret in NiFi)
-            Drive service = new Drive.Builder(HTTP_TRANSPORT, JSON_FACTORY, GoogleCredential
-                    .fromStream(new ByteArrayInputStream(context.getProperty(IAM_USER_JSON).getValue().getBytes(StandardCharsets.UTF_8)))
-                    .createScoped(Arrays.asList("https://www.googleapis.com/auth/drive")))
+            final Drive service = new Drive.Builder(HTTP_TRANSPORT, JSON_FACTORY, GoogleCredential
+                    .fromStream(new ByteArrayInputStream(context.getProperty(IAM_USER_JSON).evaluateAttributeExpressions().getValue().getBytes(StandardCharsets.UTF_8)))
+                    .createScoped(Arrays.asList(HTTPS_WWW_GOOGLEAPIS_COM_AUTH_DRIVE)))
                     .setApplicationName("NiFi")
                     .build();
             getLogger().trace("Service created - start listing");
             while (first || nextToken != null) {
                 first = false;
-                FileList result = service.files().list()
-                        .setQ("'" + context.getProperty(FOLDER).getValue() + "' in parents") // also coming from NiFi
+                final FileList result = service.files().list()
+                        .setQ("'" + context.getProperty(FOLDER).evaluateAttributeExpressions().getValue() + "' in parents") // also coming from NiFi
                         .setPageSize(context.getProperty(BATCH_SIZE).asInteger())
                         .setPageToken(nextToken)
                         .setFields("nextPageToken, files(id, name, mimeType, createdTime, modifiedTime)")
                         .execute();
-                List<File> files = result.getFiles();
+                final List<File> files = result.getFiles();
                 if (null == files || files.isEmpty()) {
                     getLogger().trace("No more file infos");
                     break;
@@ -153,15 +168,15 @@ public class ListGdrive extends AbstractGdriveProcessor {
                 for (File file : files) {
                     if (file.getModifiedTime().getValue() > timestampPrevRun || fromBeginning) {
                         currentTimestamp = Math.max(currentTimestamp, file.getModifiedTime().getValue());
-                        FlowFile ff = session.create();
-                        session.putAttribute(ff, "filename", file.getName());
-                        session.putAttribute(ff, "fileid", file.getId());
-                        session.putAttribute(ff, "created", file.getCreatedTime().toString());
-                        session.putAttribute(ff, "modified", file.getModifiedTime().toString());
-                        session.putAttribute(ff, "mime.type", file.getMimeType());
-                        session.putAttribute(ff, "is.folder", Boolean.toString(FOLDER_MIME_TYPE.equals(file.getMimeType())));
-                        session.putAttribute(ff, "parent.folder", context.getProperty("folder").getValue());
-                        session.transfer(ff, REL_SUCCESS);
+                        FlowFile flowFile = session.create();
+                        session.putAttribute(flowFile, "filename", file.getName());
+                        session.putAttribute(flowFile, "fileid", file.getId());
+                        session.putAttribute(flowFile, "created", file.getCreatedTime().toString());
+                        session.putAttribute(flowFile, "modified", file.getModifiedTime().toString());
+                        session.putAttribute(flowFile, "mime.type", file.getMimeType());
+                        session.putAttribute(flowFile, "is.folder", Boolean.toString(FOLDER_MIME_TYPE.equals(file.getMimeType())));
+                        session.putAttribute(flowFile, "parent.folder", context.getProperty("folder").getValue());
+                        session.transfer(flowFile, REL_SUCCESS);
                         uncommitted++;
                     }
                     if (uncommitted >= context.getProperty(BATCH_SIZE).asInteger()) {
