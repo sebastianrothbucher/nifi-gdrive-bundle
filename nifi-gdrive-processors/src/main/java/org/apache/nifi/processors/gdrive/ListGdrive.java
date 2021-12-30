@@ -120,6 +120,8 @@ public class ListGdrive extends AbstractGdriveProcessor {
             context.yield();
             return;
         }
+        final boolean fromBeginning = context.getProperty(FROM_BEGINNING).asBoolean();
+        long timestampPrevRun = this.currentTimestamp; // (from last run - or zero)
         boolean first = true;
         Object nextToken = null;
         try {
@@ -147,18 +149,19 @@ public class ListGdrive extends AbstractGdriveProcessor {
                 nextToken = result.getNextPageToken();
                 long uncommitted = 0;
                 for (File file : files) {
-                    // TODO: skip those not modified - TODO: can improve by not even listing
-                    currentTimestamp = Math.max(currentTimestamp, file.getModifiedTime().getValue());
-                    FlowFile ff = session.create();
-                    session.putAttribute(ff, "filename", file.getName());
-                    session.putAttribute(ff, "fileid", file.getId());
-                    session.putAttribute(ff, "created", file.getCreatedTime().toString());
-                    session.putAttribute(ff, "modified", file.getModifiedTime().toString());
-                    session.putAttribute(ff, "mime.type", file.getMimeType());
-                    session.putAttribute(ff, "is.folder", Boolean.toString(FOLDER_MIME_TYPE.equals(file.getMimeType())));
-                    session.putAttribute(ff, "parent.folder", context.getProperty("folder").getValue());
-                    session.transfer(ff, REL_SUCCESS);
-                    uncommitted++;
+                    if (file.getModifiedTime().getValue() > timestampPrevRun || fromBeginning) {
+                        currentTimestamp = Math.max(currentTimestamp, file.getModifiedTime().getValue());
+                        FlowFile ff = session.create();
+                        session.putAttribute(ff, "filename", file.getName());
+                        session.putAttribute(ff, "fileid", file.getId());
+                        session.putAttribute(ff, "created", file.getCreatedTime().toString());
+                        session.putAttribute(ff, "modified", file.getModifiedTime().toString());
+                        session.putAttribute(ff, "mime.type", file.getMimeType());
+                        session.putAttribute(ff, "is.folder", Boolean.toString(FOLDER_MIME_TYPE.equals(file.getMimeType())));
+                        session.putAttribute(ff, "parent.folder", context.getProperty("folder").getValue());
+                        session.transfer(ff, REL_SUCCESS);
+                        uncommitted++;
+                    }
                     if (uncommitted >= context.getProperty(BATCH_SIZE).asInteger()) {
                         session.commit();
                         uncommitted = 0;
