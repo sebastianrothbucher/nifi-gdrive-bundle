@@ -48,7 +48,9 @@ import java.util.*;
         @WritesAttribute(attribute = "modified", description = "The modified date of the file"),
         @WritesAttribute(attribute = "mime.type", description = "The mime type of the file"),
         @WritesAttribute(attribute = "is.folder", description = "True if this file is a folder"),
-        @WritesAttribute(attribute = "parent.folder", description = "The parent folder = the folder to be listed")
+        @WritesAttribute(attribute = "file.path", description = "The path to the file (below folder to be listed)"),
+        @WritesAttribute(attribute = "parent.folder", description = "The common parent folder id = the folder to be listed"),
+        @WritesAttribute(attribute = "file.parent.folder", description = "The immediate parent folder id")
 })
 public class ListGdrive extends AbstractGdriveProcessor {
 
@@ -86,8 +88,17 @@ public class ListGdrive extends AbstractGdriveProcessor {
             .defaultValue("false")
             .build();
 
+    public static final PropertyDescriptor RECURSIVE_SEARCH = new PropertyDescriptor.Builder()
+            .name("Search Recursively")
+            .expressionLanguageSupported(ExpressionLanguageScope.NONE)
+            .description("If true, will pull files from arbitrarily nested subdirectories; otherwise, will not traverse subdirectories")
+            .required(false)
+            .defaultValue("false")
+            .allowableValues("true", "false")
+            .build();
+
     public static final List<PropertyDescriptor> properties = Collections.unmodifiableList(Arrays.asList(
-        IAM_USER_JSON, FOLDER, BATCH_SIZE, FROM_BEGINNING));
+        IAM_USER_JSON, FOLDER, BATCH_SIZE, FROM_BEGINNING, RECURSIVE_SEARCH));
 
     public static final Set<Relationship> relationships = Collections.singleton(REL_SUCCESS);
 
@@ -118,7 +129,6 @@ public class ListGdrive extends AbstractGdriveProcessor {
     private void persistState(final ProcessSession session) {
         final Map<String, String> state = new HashMap<>();
         state.put(CURRENT_TIMESTAMP, String.valueOf(currentTimestamp));
-
         try {
             session.setState(state, Scope.CLUSTER);
         } catch (IOException ioe) {
@@ -137,8 +147,6 @@ public class ListGdrive extends AbstractGdriveProcessor {
         }
         final boolean fromBeginning = context.getProperty(FROM_BEGINNING).asBoolean();
         long timestampPrevRun = this.currentTimestamp; // (from last run - or zero)
-        boolean first = true;
-        String nextToken = null;
         try {
             final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
             final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
@@ -149,42 +157,8 @@ public class ListGdrive extends AbstractGdriveProcessor {
                     .setApplicationName("NiFi")
                     .build();
             getLogger().trace("Service created - start listing");
-            while (first || nextToken != null) {
-                first = false;
-                final FileList result = service.files().list()
-                        .setQ("'" + context.getProperty(FOLDER).evaluateAttributeExpressions().getValue() + "' in parents") // also coming from NiFi
-                        .setPageSize(context.getProperty(BATCH_SIZE).asInteger())
-                        .setPageToken(nextToken)
-                        .setFields("nextPageToken, files(id, name, mimeType, createdTime, modifiedTime)")
-                        .execute();
-                final List<File> files = result.getFiles();
-                if (null == files || files.isEmpty()) {
-                    getLogger().trace("No more file infos");
-                    break;
-                }
-                getLogger().trace("Pulled {} file infos", new Object[] {files.size()});
-                nextToken = result.getNextPageToken();
-                long uncommitted = 0;
-                for (File file : files) {
-                    if (file.getModifiedTime().getValue() > timestampPrevRun || fromBeginning) {
-                        currentTimestamp = Math.max(currentTimestamp, file.getModifiedTime().getValue());
-                        FlowFile flowFile = session.create();
-                        session.putAttribute(flowFile, "filename", file.getName());
-                        session.putAttribute(flowFile, "fileid", file.getId());
-                        session.putAttribute(flowFile, "created", file.getCreatedTime().toString());
-                        session.putAttribute(flowFile, "modified", file.getModifiedTime().toString());
-                        session.putAttribute(flowFile, "mime.type", file.getMimeType());
-                        session.putAttribute(flowFile, "is.folder", Boolean.toString(FOLDER_MIME_TYPE.equals(file.getMimeType())));
-                        session.putAttribute(flowFile, "parent.folder", context.getProperty("folder").getValue());
-                        session.transfer(flowFile, REL_SUCCESS);
-                        uncommitted++;
-                    }
-                    if (uncommitted >= context.getProperty(BATCH_SIZE).asInteger()) {
-                        session.commit();
-                        uncommitted = 0;
-                    }
-                }
-            }
+            final String rootFolderId = context.getProperty(FOLDER).evaluateAttributeExpressions().getValue();
+            performListing(session, service, rootFolderId, rootFolderId, "", fromBeginning, context.getProperty(RECURSIVE_SEARCH).asBoolean(), context.getProperty(BATCH_SIZE).asInteger(), timestampPrevRun);
         } catch (final Exception e) {
             getLogger().error("Failed to list contents due to {}", new Object[] {e}, e);
             session.rollback();
@@ -192,6 +166,58 @@ public class ListGdrive extends AbstractGdriveProcessor {
             return;
         }
         persistState(session);
-        session.commit();
+        session.commit(); // (regardless)
+    }
+
+    private void performListing(ProcessSession session, Drive service, String folderId, String rootFolderId, String parentPath, boolean fromBeginning, boolean recursive, int batchSize, long timestampPrevRun) throws IOException {
+        getLogger().trace("Pulling file infos from ", new Object[] {folderId});
+        boolean first = true;
+        String nextToken = null;
+        long uncommitted = 0;
+        final List<String[]> subfoldersToList = new LinkedList<>();
+        while (first || nextToken != null) {
+            first = false;
+            final FileList result = service.files().list()
+                    .setQ("'" + folderId + "' in parents") // also coming from NiFi
+                    .setPageSize(batchSize)
+                    .setPageToken(nextToken)
+                    .setFields("nextPageToken, files(id, name, mimeType, createdTime, modifiedTime)")
+                    .execute();
+            final List<File> files = result.getFiles();
+            if (null == files || files.isEmpty()) {
+                getLogger().trace("No more file infos");
+                break;
+            }
+            getLogger().trace("Pulled {} file infos", new Object[] {files.size()});
+            nextToken = result.getNextPageToken();
+            for (File file : files) {
+                if (recursive && FOLDER_MIME_TYPE.equals(file.getMimeType())) {
+                    subfoldersToList.add(new String[]{file.getId(), file.getName()});
+                }
+                if (file.getModifiedTime().getValue() > timestampPrevRun || fromBeginning) {
+                    currentTimestamp = Math.max(currentTimestamp, file.getModifiedTime().getValue());
+                    FlowFile flowFile = session.create();
+                    session.putAttribute(flowFile, "filename", file.getName());
+                    session.putAttribute(flowFile, "fileid", file.getId());
+                    session.putAttribute(flowFile, "created", file.getCreatedTime().toString());
+                    session.putAttribute(flowFile, "modified", file.getModifiedTime().toString());
+                    session.putAttribute(flowFile, "mime.type", file.getMimeType());
+                    session.putAttribute(flowFile, "is.folder", Boolean.toString(FOLDER_MIME_TYPE.equals(file.getMimeType())));
+                    session.putAttribute(flowFile, "file.path", parentPath + (parentPath.length() > 0 ? "/" : "") + file.getName());
+                    session.putAttribute(flowFile, "parent.folder", rootFolderId);
+                    session.putAttribute(flowFile, "file.parent.folder", folderId);
+                    session.transfer(flowFile, REL_SUCCESS);
+                    uncommitted++;
+                }
+                if (uncommitted >= batchSize) {
+                    session.commit();
+                    uncommitted = 0;
+                }
+            }
+        }
+        session.commit(); // (regardless)
+        for (String[] subfolderToList : subfoldersToList) {
+            performListing(session, service, subfolderToList[0], rootFolderId, parentPath + (parentPath.length() > 0 ? "/" : "") + subfolderToList[1], fromBeginning, recursive, batchSize, timestampPrevRun);
+        }
     }
 }
