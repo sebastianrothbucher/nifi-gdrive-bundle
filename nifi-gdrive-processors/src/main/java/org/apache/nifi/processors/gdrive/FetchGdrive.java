@@ -37,8 +37,6 @@ import java.util.*;
 })
 public class FetchGdrive extends AbstractGdriveProcessor {
 
-    static final String FOLDER_MIME_TYPE = "application/vnd.google-apps.folder";
-
     public static final PropertyDescriptor FILE = new PropertyDescriptor.Builder()
             .name("File")
             .displayName("File")
@@ -65,7 +63,7 @@ public class FetchGdrive extends AbstractGdriveProcessor {
     }
 
     @Override
-    public void onTrigger(ProcessContext context, ProcessSession session) throws ProcessException {
+    public void onTrigger(ProcessContext context, ProcessSession session) throws ProcessException { // TODO: more trace - 2nd mode: use filename instead of fileid
         FlowFile flowFile = session.get();
         if (null == flowFile) {
             return;

@@ -1,2 +1,3 @@
 org.apache.nifi.processors.gdrive.ListGdrive
 org.apache.nifi.processors.gdrive.FetchGdrive
+org.apache.nifi.processors.gdrive.PutGdrive
