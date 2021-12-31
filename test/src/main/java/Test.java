@@ -1,13 +1,16 @@
 import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
 import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
+import com.google.api.client.http.FileContent;
 import com.google.api.client.http.javanet.NetHttpTransport;
 import com.google.api.client.json.JsonFactory;
 import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.services.drive.Drive;
+import com.google.api.services.drive.model.About;
 import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.FileList;
 import org.apache.commons.io.IOUtils;
@@ -46,5 +49,27 @@ public class Test {
         System.out.printf("%s (%s, %s, %s)\n", fileMeta.getName(), fileMeta.getMimeType(), fileMeta.getId(), fileMeta.getModifiedTime());
         String content = IOUtils.toString(new InputStreamReader(get.executeMediaAsInputStream(), "utf-8"));
         System.out.println(content);
+        // (ditto a folder)
+        final Drive.Files.Get folderGet = service.files()
+            .get("1lUN7HEFiDVNjPwYWT136XChDh5JDLoz_")
+            .setFields("owners");
+        File folderMeta = folderGet.execute();
+        //System.out.println(folderMeta.getOwners());
+        service.files().emptyTrash();
+        final About.StorageQuota quota = service.about().get().setFields("storageQuota(*)").execute().getStorageQuota();
+        System.out.println("Limit: " + quota.getLimit() + " / used: " + quota.getUsage());
+        System.exit(0);
+        // upload and overwrite if nec - srv account has sep. quota of 15GB (ideally, target should be shared drive, not shared personal folder!)
+        File fileMetadata = new File();
+        fileMetadata.setName("photo.jpg");
+        fileMetadata.setParents(Collections.singletonList("1lUN7HEFiDVNjPwYWT136XChDh5JDLoz_"));
+        //fileMetadata.setOwners(folderMeta.getOwners());
+        java.io.File filePath = new java.io.File("/Users/sebastianrothbucher/Desktop/photo.jpg");
+        FileContent mediaContent = new FileContent("image/jpeg", filePath);
+        File uploaded = service.files().create(fileMetadata, mediaContent)
+                .setFields("id")
+                .execute();
+        System.out.println("File ID: " + uploaded.getId());
+        // still todo: check name exists & overwrite + create folders when folder/filename format
     }
 }
