@@ -1,10 +1,5 @@
 package org.apache.nifi.processors.gdrive;
 
-import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
-import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
-import com.google.api.client.http.javanet.NetHttpTransport;
-import com.google.api.client.json.JsonFactory;
-import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.model.File;
 import org.apache.commons.io.IOUtils;
@@ -20,9 +15,7 @@ import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.util.StandardValidators;
 
-import java.io.ByteArrayInputStream;
 import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @InputRequirement(InputRequirement.Requirement.INPUT_REQUIRED)
@@ -69,24 +62,19 @@ public class FetchGdrive extends AbstractGdriveProcessor {
             return;
         }
         try {
-            final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
-            final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
-            // get IAM file and provide it as stream (like we'll store it as secret in NiFi)
-            final Drive service = new Drive.Builder(HTTP_TRANSPORT, JSON_FACTORY, GoogleCredential
-                    .fromStream(new ByteArrayInputStream(context.getProperty(IAM_USER_JSON).evaluateAttributeExpressions().getValue().getBytes(StandardCharsets.UTF_8)))
-                    .createScoped(Arrays.asList(HTTPS_WWW_GOOGLEAPIS_COM_AUTH_DRIVE)))
-                    .setApplicationName("NiFi")
-                    .build();
+            final Drive service = createDriveService(context);
             final Drive.Files.Get get = service.files()
                     .get(context.getProperty(FILE).evaluateAttributeExpressions(flowFile).getValue())
                     .setFields("id, name, mimeType, createdTime, modifiedTime");
             // get metadata
             File fileMeta = get.execute();
-            session.putAttribute(flowFile, "filename", fileMeta.getName());
-            session.putAttribute(flowFile, "fileid", fileMeta.getId());
-            session.putAttribute(flowFile, "created", fileMeta.getCreatedTime().toString());
-            session.putAttribute(flowFile, "modified", fileMeta.getModifiedTime().toString());
-            session.putAttribute(flowFile, "mime.type", fileMeta.getMimeType());
+            Map<String, String> allAttributes = new HashMap<>();
+            allAttributes.put("filename", fileMeta.getName());
+            allAttributes.put("fileid", fileMeta.getId());
+            allAttributes.put("created", fileMeta.getCreatedTime().toString());
+            allAttributes.put("modified", fileMeta.getModifiedTime().toString());
+            allAttributes.put("mime.type", fileMeta.getMimeType());
+            flowFile = session.putAllAttributes(flowFile, allAttributes);
             // get contents
             OutputStream contentStream = session.write(flowFile);
             IOUtils.copy(get.executeMediaAsInputStream(), contentStream);

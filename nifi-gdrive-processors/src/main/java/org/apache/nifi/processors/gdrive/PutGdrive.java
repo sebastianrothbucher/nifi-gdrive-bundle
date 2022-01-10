@@ -1,11 +1,6 @@
 package org.apache.nifi.processors.gdrive;
 
-import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
-import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
 import com.google.api.client.http.InputStreamContent;
-import com.google.api.client.http.javanet.NetHttpTransport;
-import com.google.api.client.json.JsonFactory;
-import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.FileList;
@@ -21,8 +16,6 @@ import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.util.StandardValidators;
 
-import java.io.ByteArrayInputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @InputRequirement(InputRequirement.Requirement.INPUT_REQUIRED)
@@ -81,14 +74,7 @@ public class PutGdrive extends AbstractGdriveProcessor {
             return;
         }
         try {
-            final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
-            final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
-            // get IAM file and provide it as stream (like we'll store it as secret in NiFi)
-            final Drive service = new Drive.Builder(HTTP_TRANSPORT, JSON_FACTORY, GoogleCredential
-                    .fromStream(new ByteArrayInputStream(context.getProperty(IAM_USER_JSON).evaluateAttributeExpressions().getValue().getBytes(StandardCharsets.UTF_8)))
-                    .createScoped(Arrays.asList(HTTPS_WWW_GOOGLEAPIS_COM_AUTH_DRIVE)))
-                    .setApplicationName("NiFi")
-                    .build();
+            final Drive service = createDriveService(context);
             final String[] targetName = flowFile.getAttribute("filename").split("/");
             String currentFolderId = context.getProperty(FOLDER).evaluateAttributeExpressions(flowFile).getValue();
             for (int i = 0; i < targetName.length; i++) {
@@ -128,9 +114,9 @@ public class PutGdrive extends AbstractGdriveProcessor {
                         uploaded = service.files().create(fileMetadata, mediaContent)
                                 .setFields("id")
                                 .execute();
-                        session.putAttribute(flowFile, "file.created", Boolean.toString(true));
+                        flowFile = session.putAttribute(flowFile, "file.created", Boolean.toString(true));
                     } else if (context.getProperty(FAIL_IF_EXISTS).asBoolean()) {
-                        session.putAttribute(flowFile, "error.file.exists", Boolean.toString(true));
+                        flowFile = session.putAttribute(flowFile, "error.file.exists", Boolean.toString(true));
                         session.transfer(flowFile, REL_FAILURE);
                         session.commit();
                         context.yield();
@@ -139,9 +125,9 @@ public class PutGdrive extends AbstractGdriveProcessor {
                         uploaded = service.files().update(existId, null, mediaContent)
                                 .setFields("id")
                                 .execute();
-                        session.putAttribute(flowFile, "file.created", Boolean.toString(false));
+                        flowFile = session.putAttribute(flowFile, "file.created", Boolean.toString(false));
                     }
-                    session.putAttribute(flowFile, "fileid", uploaded.getId());
+                    flowFile = session.putAttribute(flowFile, "fileid", uploaded.getId());
                 }
             }
             session.transfer(flowFile, REL_SUCCESS);

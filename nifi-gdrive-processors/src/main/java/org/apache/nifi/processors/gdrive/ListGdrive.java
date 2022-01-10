@@ -1,10 +1,5 @@
 package org.apache.nifi.processors.gdrive;
 
-import com.google.api.client.googleapis.auth.oauth2.GoogleCredential;
-import com.google.api.client.googleapis.javanet.GoogleNetHttpTransport;
-import com.google.api.client.http.javanet.NetHttpTransport;
-import com.google.api.client.json.JsonFactory;
-import com.google.api.client.json.jackson2.JacksonFactory;
 import com.google.api.services.drive.Drive;
 import com.google.api.services.drive.model.File;
 import com.google.api.services.drive.model.FileList;
@@ -23,9 +18,7 @@ import org.apache.nifi.processor.Relationship;
 import org.apache.nifi.processor.exception.ProcessException;
 import org.apache.nifi.processor.util.StandardValidators;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @PrimaryNodeOnly
@@ -148,14 +141,7 @@ public class ListGdrive extends AbstractGdriveProcessor {
         final boolean fromBeginning = context.getProperty(FROM_BEGINNING).asBoolean();
         long timestampPrevRun = this.currentTimestamp; // (from last run - or zero)
         try {
-            final NetHttpTransport HTTP_TRANSPORT = GoogleNetHttpTransport.newTrustedTransport();
-            final JsonFactory JSON_FACTORY = JacksonFactory.getDefaultInstance();
-            // get IAM file and provide it as stream (like we'll store it as secret in NiFi)
-            final Drive service = new Drive.Builder(HTTP_TRANSPORT, JSON_FACTORY, GoogleCredential
-                    .fromStream(new ByteArrayInputStream(context.getProperty(IAM_USER_JSON).evaluateAttributeExpressions().getValue().getBytes(StandardCharsets.UTF_8)))
-                    .createScoped(Arrays.asList(HTTPS_WWW_GOOGLEAPIS_COM_AUTH_DRIVE)))
-                    .setApplicationName("NiFi")
-                    .build();
+            final Drive service = createDriveService(context);
             getLogger().trace("Service created - start listing");
             final String rootFolderId = context.getProperty(FOLDER).evaluateAttributeExpressions().getValue();
             performListing(session, service, rootFolderId, rootFolderId, "", fromBeginning, context.getProperty(RECURSIVE_SEARCH).asBoolean(), context.getProperty(BATCH_SIZE).asInteger(), timestampPrevRun);
@@ -197,15 +183,17 @@ public class ListGdrive extends AbstractGdriveProcessor {
                 if (file.getModifiedTime().getValue() > timestampPrevRun || fromBeginning) {
                     currentTimestamp = Math.max(currentTimestamp, file.getModifiedTime().getValue());
                     FlowFile flowFile = session.create();
-                    session.putAttribute(flowFile, "filename", file.getName());
-                    session.putAttribute(flowFile, "fileid", file.getId());
-                    session.putAttribute(flowFile, "created", file.getCreatedTime().toString());
-                    session.putAttribute(flowFile, "modified", file.getModifiedTime().toString());
-                    session.putAttribute(flowFile, "mime.type", file.getMimeType());
-                    session.putAttribute(flowFile, "is.folder", Boolean.toString(FOLDER_MIME_TYPE.equals(file.getMimeType())));
-                    session.putAttribute(flowFile, "file.path", parentPath + (parentPath.length() > 0 ? "/" : "") + file.getName());
-                    session.putAttribute(flowFile, "parent.folder", rootFolderId);
-                    session.putAttribute(flowFile, "file.parent.folder", folderId);
+                    Map<String, String> allAttributes = new HashMap<>();
+                    allAttributes.put("filename", file.getName());
+                    allAttributes.put("fileid", file.getId());
+                    allAttributes.put("created", file.getCreatedTime().toString());
+                    allAttributes.put("modified", file.getModifiedTime().toString());
+                    allAttributes.put("mime.type", file.getMimeType());
+                    allAttributes.put("is.folder", Boolean.toString(FOLDER_MIME_TYPE.equals(file.getMimeType())));
+                    allAttributes.put("file.path", parentPath + (parentPath.length() > 0 ? "/" : "") + file.getName());
+                    allAttributes.put("parent.folder", rootFolderId);
+                    allAttributes.put("file.parent.folder", folderId);
+                    flowFile = session.putAllAttributes(flowFile, allAttributes);
                     session.transfer(flowFile, REL_SUCCESS);
                     uncommitted++;
                 }
